@@ -49,6 +49,11 @@ class ClipboardCoalescer:
         self._last_copy_at = now
         self._last_payload = payload
 
+    def in_burst(self) -> bool:
+        if not self._last_payload:
+            return False
+        return time.monotonic() - self._last_copy_at <= self.burst_window_sec
+
     def reset(self) -> None:
         self._last_copy_at = 0.0
         self._last_payload = ""
@@ -112,8 +117,28 @@ def _print_help() -> None:
         "\n"
         "Multiline:\n"
         "  - With prompt_toolkit installed: paste multiline text, press Enter to submit.\n"
+        "    Use Ctrl+J to insert a newline manually.\n"
         "  - Without it: use :paste and end with a line containing only '.'\n"
     )
+
+
+def _readline_pending_buffer() -> str:
+    """
+    Best-effort access to the current readline buffer when input is interrupted.
+    """
+    try:
+        import readline  # type: ignore
+    except Exception:
+        return ""
+
+    getter = getattr(readline, "get_line_buffer", None)
+    if getter is None:
+        return ""
+
+    try:
+        return getter()
+    except Exception:
+        return ""
 
 
 def repl_fallback(src_enc: str, dst_enc: str, errors: str, do_copy: bool) -> int:
@@ -126,7 +151,12 @@ def repl_fallback(src_enc: str, dst_enc: str, errors: str, do_copy: bool) -> int
             print()
             return 0
         except KeyboardInterrupt:
+            pending = _readline_pending_buffer()
             print()
+            if pending and copier.in_burst():
+                out = convert(pending, src_enc, dst_enc, errors)
+                print(out)
+                copier.copy(out)
             continue
 
         s = line.strip()
@@ -185,12 +215,12 @@ def repl_prompt_toolkit(src_enc: str, dst_enc: str, errors: str, do_copy: bool) 
 
     kb = KeyBindings()
 
-    # Enter submits; Shift+Enter inserts newline.
+    # Enter submits; Ctrl+J inserts newline.
     @kb.add("enter")
     def _(event) -> None:
         event.app.exit(result=event.app.current_buffer.text)
 
-    @kb.add("s-enter")
+    @kb.add("c-j")
     def _(event) -> None:
         event.app.current_buffer.insert_text("\n")
 
