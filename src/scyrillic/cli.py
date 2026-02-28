@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import base64
 import sys
+import time
 from pathlib import Path
 
 OSC_SELECTION = "c"
@@ -17,6 +18,39 @@ def _osc52(data: bytes) -> bytes:
 def copy_osc52(text: str) -> None:
     sys.stdout.buffer.write(_osc52(text.encode("utf-8")))
     sys.stdout.buffer.flush()
+
+
+class ClipboardCoalescer:
+    """
+    Merge rapid consecutive REPL outputs into one clipboard payload.
+
+    This keeps multiline paste usable even when terminals submit each line
+    separately and each conversion would otherwise overwrite the clipboard.
+    """
+
+    def __init__(self, enabled: bool, burst_window_sec: float = 0.75):
+        self.enabled = enabled and sys.stdout.isatty()
+        self.burst_window_sec = burst_window_sec
+        self._last_copy_at = 0.0
+        self._last_payload = ""
+
+    def copy(self, text: str, coalesce: bool = True) -> None:
+        if not self.enabled:
+            return
+
+        now = time.monotonic()
+        payload = text
+        if coalesce and self._last_payload and now - self._last_copy_at <= self.burst_window_sec:
+            sep = "\n" if text and not self._last_payload.endswith("\n") else ""
+            payload = self._last_payload + sep + text
+
+        copy_osc52(payload)
+        self._last_copy_at = now
+        self._last_payload = payload
+
+    def reset(self) -> None:
+        self._last_copy_at = 0.0
+        self._last_payload = ""
 
 
 def recode_segments(text: str, src_enc: str, dst_enc: str, errors: str = "replace") -> str:
@@ -79,6 +113,7 @@ def _print_help() -> None:
 
 def repl_fallback(src_enc: str, dst_enc: str, errors: str, do_copy: bool) -> int:
     print("scyrillic. Type :help for commands.\n")
+    copier = ClipboardCoalescer(enabled=do_copy)
     while True:
         try:
             line = input("> ")
@@ -94,22 +129,27 @@ def repl_fallback(src_enc: str, dst_enc: str, errors: str, do_copy: bool) -> int
         if s in (":q", ":quit", ":exit"):
             return 0
         if s in (":help",):
+            copier.reset()
             _print_help()
             continue
         if s in (":enc",):
+            copier.reset()
             print(f"from={src_enc}  to={dst_enc}  errors={errors}\n")
             continue
 
         if s.startswith(":from "):
+            copier.reset()
             src_enc = s.split(None, 1)[1].strip()
             print(f"from={src_enc}\n")
             continue
         if s.startswith(":to "):
+            copier.reset()
             dst_enc = s.split(None, 1)[1].strip()
             print(f"to={dst_enc}\n")
             continue
 
         if s == ":paste":
+            copier.reset()
             lines: list[str] = []
             print("(paste mode) end with a single '.' line")
             while True:
@@ -126,14 +166,12 @@ def repl_fallback(src_enc: str, dst_enc: str, errors: str, do_copy: bool) -> int
             print(out)
             if out and not out.endswith("\n"):
                 print()
-            if do_copy and sys.stdout.isatty():
-                copy_osc52(out)
+            copier.copy(out, coalesce=False)
             continue
 
         out = convert(line, src_enc, dst_enc, errors)
         print(out)
-        if do_copy and sys.stdout.isatty():
-            copy_osc52(out)
+        copier.copy(out)
 
 
 def repl_prompt_toolkit(src_enc: str, dst_enc: str, errors: str, do_copy: bool) -> int:
@@ -152,6 +190,7 @@ def repl_prompt_toolkit(src_enc: str, dst_enc: str, errors: str, do_copy: bool) 
         event.app.current_buffer.insert_text("\n")
 
     session = PromptSession()
+    copier = ClipboardCoalescer(enabled=do_copy)
 
     print("scyrillic. Type :help for commands.\n")
     while True:
@@ -173,16 +212,20 @@ def repl_prompt_toolkit(src_enc: str, dst_enc: str, errors: str, do_copy: bool) 
         if s in (":q", ":quit", ":exit"):
             return 0
         if s == ":help":
+            copier.reset()
             _print_help()
             continue
         if s == ":enc":
+            copier.reset()
             print(f"from={src_enc}  to={dst_enc}  errors={errors}\n")
             continue
         if s.startswith(":from "):
+            copier.reset()
             src_enc = s.split(None, 1)[1].strip()
             print(f"from={src_enc}\n")
             continue
         if s.startswith(":to "):
+            copier.reset()
             dst_enc = s.split(None, 1)[1].strip()
             print(f"to={dst_enc}\n")
             continue
@@ -191,8 +234,7 @@ def repl_prompt_toolkit(src_enc: str, dst_enc: str, errors: str, do_copy: bool) 
         print(out)
         if out and not out.endswith("\n"):
             print()
-        if do_copy and sys.stdout.isatty():
-            copy_osc52(out)
+        copier.copy(out)
 
 
 def main(argv: list[str] | None = None) -> int:
