@@ -4,6 +4,7 @@ import argparse
 import base64
 import sys
 import time
+import unicodedata
 from pathlib import Path
 
 OSC_SELECTION = "c"
@@ -63,6 +64,10 @@ def recode_segments(text: str, src_enc: str, dst_enc: str, errors: str = "replac
 
     Unicode-safe: characters not representable in src_enc are passed through unchanged.
     """
+    # Accept decomposed input (e.g. A + combining diaeresis) from shell/paste
+    # so it can be encoded as the expected single-byte source text.
+    text = unicodedata.normalize("NFC", text)
+
     out: list[str] = []
     buf = bytearray()
 
