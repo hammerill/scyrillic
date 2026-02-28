@@ -1,0 +1,19 @@
+[project]
+name = "scyrillic"
+version = "0.1.0"
+description = "Convert broken Scratch 2 Cyrillic text back to normal for Scratch 3."
+readme = "README.md"
+authors = [
+    { name = "hammerill", email = "kyrylo@hammerill.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "prompt-toolkit>=3.0.52",
+]
+
+[project.scripts]
+scyrillic = "scyrillic.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.9.13,<0.10.0"]
+build-backend = "uv_build"
