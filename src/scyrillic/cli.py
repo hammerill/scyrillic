@@ -113,100 +113,11 @@ def _print_help() -> None:
         "  :enc                   Show current encodings\n"
         "  :from <enc>            Set source encoding (default cp1252)\n"
         "  :to <enc>              Set target encoding (default cp1251)\n"
-        "  :paste                 (fallback REPL) enter multiline mode, end with a single '.' line\n"
         "\n"
         "Multiline:\n"
-        "  - With prompt_toolkit installed: paste multiline text, press Enter to submit.\n"
+        "  - Paste multiline text, press Enter to submit.\n"
         "    Use Ctrl+J to insert a newline manually.\n"
-        "  - Without it: use :paste and end with a line containing only '.'\n"
     )
-
-
-def _readline_pending_buffer() -> str:
-    """
-    Best-effort access to the current readline buffer when input is interrupted.
-    """
-    try:
-        import readline  # type: ignore
-    except Exception:
-        return ""
-
-    getter = getattr(readline, "get_line_buffer", None)
-    if getter is None:
-        return ""
-
-    try:
-        return getter()
-    except Exception:
-        return ""
-
-
-def repl_fallback(src_enc: str, dst_enc: str, errors: str, do_copy: bool) -> int:
-    print("scyrillic. Type :help for commands.\n")
-    copier = ClipboardCoalescer(enabled=do_copy)
-    while True:
-        try:
-            line = input("> ")
-        except EOFError:
-            print()
-            return 0
-        except KeyboardInterrupt:
-            pending = _readline_pending_buffer()
-            print()
-            if pending and copier.in_burst():
-                out = convert(pending, src_enc, dst_enc, errors)
-                print(out)
-                copier.copy(out)
-            continue
-
-        s = line.strip()
-
-        if s in (":q", ":quit", ":exit"):
-            return 0
-        if s in (":help",):
-            copier.reset()
-            _print_help()
-            continue
-        if s in (":enc",):
-            copier.reset()
-            print(f"from={src_enc}  to={dst_enc}  errors={errors}\n")
-            continue
-
-        if s.startswith(":from "):
-            copier.reset()
-            src_enc = s.split(None, 1)[1].strip()
-            print(f"from={src_enc}\n")
-            continue
-        if s.startswith(":to "):
-            copier.reset()
-            dst_enc = s.split(None, 1)[1].strip()
-            print(f"to={dst_enc}\n")
-            continue
-
-        if s == ":paste":
-            copier.reset()
-            lines: list[str] = []
-            print("(paste mode) end with a single '.' line")
-            while True:
-                try:
-                    l = input("... ")
-                except EOFError:
-                    print()
-                    break
-                if l == ".":
-                    break
-                lines.append(l)
-            text = "\n".join(lines)
-            out = convert(text, src_enc, dst_enc, errors)
-            print(out)
-            if out and not out.endswith("\n"):
-                print()
-            copier.copy(out, coalesce=False)
-            continue
-
-        out = convert(line, src_enc, dst_enc, errors)
-        print(out)
-        copier.copy(out)
 
 
 def repl_prompt_toolkit(src_enc: str, dst_enc: str, errors: str, do_copy: bool) -> int:
@@ -318,14 +229,7 @@ def main(argv: list[str] | None = None) -> int:
             copy_osc52(out)
         return 0
 
-    if sys.stdin.isatty():
-        try:
-            import prompt_toolkit  # noqa: F401
-            return repl_prompt_toolkit(args.src_enc, args.dst_enc, args.errors, do_copy)
-        except Exception:
-            return repl_fallback(args.src_enc, args.dst_enc, args.errors, do_copy)
-
-    return repl_fallback(args.src_enc, args.dst_enc, args.errors, do_copy)
+    return repl_prompt_toolkit(args.src_enc, args.dst_enc, args.errors, do_copy)
 
 
 if __name__ == "__main__":
